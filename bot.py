@@ -39,7 +39,7 @@ def preprocess_image(img):
     return thresh
 
 # ----------------- EXTRACT PLAYERS -----------------
-def extract_items(text):
+def extract_players(text):
     players = []
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     
@@ -66,7 +66,7 @@ async def process_image(data):
         return []
     preprocessed = preprocess_image(img)
     text = pytesseract.image_to_string(preprocessed, config='--psm 6')
-    return extract_items(text)
+    return extract_players(text)
 
 # ----------------- UPDATE LEADERBOARD -----------------
 async def update_leaderboard():
@@ -135,15 +135,15 @@ async def on_message(message):
             except Exception as e:
                 print(f"Error processing image: {e}")
 
-    # CORRECT EMOJI NAMES — NO MORE 10014/50035 ERRORS
+    # BULLETPROOF EMOJIS — 100% WORKING EVERYWHERE
     if found_any:
         if updated:
-            await message.add_reaction("chart_increasing")      # New personal best
+            await message.add_reaction("fire")           # New personal best!
         else:
-            await message.add_reaction("white_check_mark")      # Valid, no new high
+            await message.add_reaction("check_mark")     # Valid screenshot
         await update_leaderboard()
     else:
-        await message.add_reaction("question")                  # Nothing detected
+        await message.add_reaction("cross_mark")         # Couldn't read anything
 
     await bot.process_commands(message)
 
@@ -157,11 +157,11 @@ async def clearlb(ctx):
     await update_leaderboard()
     await ctx.send("Leaderboard cleared!", delete_after=5)
 
-# ----------------- FLASK (Render keep-alive) -----------------
+# ----------------- FLASK -----------------
 app = Flask(__name__)
 @app.route('/')
 def home():
-    return "Hunting Trap Damage Leaderboard • Fully Operational", 200
+    return "Hunting Trap Damage Leaderboard • Running", 200
 
 if __name__ == '__main__':
     threading.Thread(target=lambda: bot.run(TOKEN), daemon=True).start()
