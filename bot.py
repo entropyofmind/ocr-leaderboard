@@ -39,7 +39,7 @@ def preprocess_image(img):
     return thresh
 
 # ----------------- EXTRACT PLAYERS -----------------
-def extract_players(text):
+def extract_items(text):
     players = []
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     
@@ -66,7 +66,7 @@ async def process_image(data):
         return []
     preprocessed = preprocess_image(img)
     text = pytesseract.image_to_string(preprocessed, config='--psm 6')
-    return extract_players(text)
+    return extract_items(text)
 
 # ----------------- UPDATE LEADERBOARD -----------------
 async def update_leaderboard():
@@ -109,7 +109,7 @@ async def update_leaderboard():
 # ----------------- EVENTS -----------------
 @bot.event
 async def on_ready():
-    print(f"{bot.user} is online — ready for Hunting Trap screenshots!")
+    print(f"{bot.user} is online — Hunting Trap Leaderboard ready!")
     await update_leaderboard()
 
 @bot.event
@@ -135,15 +135,15 @@ async def on_message(message):
             except Exception as e:
                 print(f"Error processing image: {e}")
 
-    # Correct emoji reactions using colon format
+    # CORRECT EMOJI NAMES — NO MORE 10014/50035 ERRORS
     if found_any:
         if updated:
-            await message.add_reaction(":chart_with_upwards_trend:")   # New high!
+            await message.add_reaction("chart_increasing")      # New personal best
         else:
-            await message.add_reaction(":white_check_mark:")           # Valid, no new high
+            await message.add_reaction("white_check_mark")      # Valid, no new high
         await update_leaderboard()
     else:
-        await message.add_reaction(":question:")                       # Couldn't read
+        await message.add_reaction("question")                  # Nothing detected
 
     await bot.process_commands(message)
 
@@ -157,11 +157,11 @@ async def clearlb(ctx):
     await update_leaderboard()
     await ctx.send("Leaderboard cleared!", delete_after=5)
 
-# ----------------- FLASK -----------------
+# ----------------- FLASK (Render keep-alive) -----------------
 app = Flask(__name__)
 @app.route('/')
 def home():
-    return "Hunting Trap Damage Leaderboard • Running", 200
+    return "Hunting Trap Damage Leaderboard • Fully Operational", 200
 
 if __name__ == '__main__':
     threading.Thread(target=lambda: bot.run(TOKEN), daemon=True).start()
