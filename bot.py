@@ -31,10 +31,10 @@ leaderboard_message = None
 
 # ----------------- IMAGE PREPROCESSING -----------------
 def preprocess_image(img):
-    gray = cv UPC2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     gray = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
     thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2,2))
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
     thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
     return thresh
 
@@ -79,7 +79,7 @@ async def update_leaderboard():
     else:
         top20 = sorted(leaderboard.items(), key=lambda x: x[1][0], reverse=True)[:20]
         embed = discord.Embed(title="Hunting Trap Damage Ranking", color=0x00ff00)
-        medals = ["1st_place_medal", "2nd_place_medal", "3rd_place_medal"] + [f"{i}." for i in range(4,21)]
+        medals = ["1st_place_medal", "2nd_place_medal", "3rd_place_medal"] + [f"{i}." for i in range(4, 21)]
         for i, (norm, (score, name)) in enumerate(top20):
             embed.add_field(name=f"{medals[i]} **{score:,}**", value=f"`{name}`", inline=False)
         embed.set_footer(text=f"Tracking {len(leaderboard)} players • Live updated")
@@ -126,19 +126,19 @@ async def on_message(message):
             except Exception as e:
                 print(f"Error processing image: {e}")
 
-    # 100% WORKING UNICODE EMOJIS — NEVER FAIL
+    # 100% WORKING UNICODE EMOJIS (copy-paste safe)
     if found_any:
         if updated:
             await message.add_reaction("New high score!")   # Fire
         else:
-            await message.add_reaction("Valid!")            # Check
+            await message.add_reaction("Valid!")            # Check mark
         await update_leaderboard()
     else:
-        await message.add_reaction("Failed")                # Cross
+        await message.add_reaction("Failed")                # Cross mark
 
     await bot.process_commands(message)
 
-# Optional clear command
+# Optional: clear leaderboard
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def clearlb(ctx):
@@ -148,7 +148,7 @@ async def clearlb(ctx):
     await update_leaderboard()
     await ctx.send("Leaderboard cleared!", delete_after=5)
 
-# ----------------- FLASK -----------------
+# ----------------- FLASK (Render keep-alive) -----------------
 app = Flask(__name__)
 @app.route('/')
 def home():
