@@ -8,7 +8,7 @@ import numpy as np
 import re
 from flask import Flask
 
-# Fix for Render/Docker
+# Tesseract path for Render/Docker
 pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
 
 # ================== CONFIG ==================
@@ -29,7 +29,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 leaderboard = {}
 leaderboard_message = None
 
-# ----------------- IMAGE PREPROCESSING (optimized for your game) -----------------
+# ----------------- IMAGE PREPROCESSING -----------------
 def preprocess_image(img):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     gray = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
@@ -38,7 +38,7 @@ def preprocess_image(img):
     thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
     return thresh
 
-# ----------------- EXTRACT PLAYERS FROM YOUR MAIL SCREENSHOT -----------------
+# ----------------- EXTRACT PLAYERS -----------------
 def extract_players(text):
     players = []
     lines = [line.strip() for line in text.split('\n') if line.strip()]
@@ -46,27 +46,19 @@ def extract_players(text):
     i = 0
     while i < len(lines):
         line = lines[i]
-        
-        # Look for name (contains letters, not just numbers)
         if re.search(r'[A-Za-z]', line) and not re.search(r'^\d+$', line):
-            # Try to find score in same line or next line
-            score = None
             full_line = line + " " + (lines[i+1] if i+1 < len(lines) else "")
-            
             match = re.search(r'(\d{1,3}(?:,\d{3})+(?:\.\d+)?)', full_line)
             if match:
                 score = int(match.group(1).replace(',', ''))
-                
-            if score and score >= 100:
-                # Clean name
-                name = re.sub(r'[^A-Za-z0-9_\-\[\] ]', '', line).strip()
-                if name and len(name) >= 2:
-                    norm_name = name.lower()
-                    players.append((norm_name, score, name[:20]))
+                if score >= 100:
+                    name = re.sub(r'[^A-Za-z0-9_\-\[\] ]', '', line).strip()
+                    if name and len(name) >= 2:
+                        norm_name = name.lower()
+                        players.append((norm_name, score, name[:20]))
         i += 1
     return players
 
-# ----------------- PROCESS ONE IMAGE -----------------
 async def process_image(data):
     nparr = np.frombuffer(data, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -76,12 +68,11 @@ async def process_image(data):
     text = pytesseract.image_to_string(preprocessed, config='--psm 6')
     return extract_players(text)
 
-# ----------------- UPDATE LEADERBOARD EMBED -----------------
+# ----------------- UPDATE LEADERBOARD -----------------
 async def update_leaderboard():
     global leaderboard_message
     channel = bot.get_channel(CHANNEL_B_ID)
     if not channel:
-        print("Leaderboard channel not found!")
         return
 
     if not leaderboard:
@@ -109,18 +100,17 @@ async def update_leaderboard():
         else:
             leaderboard_message = await channel.send(embed=embed)
             await leaderboard_message.pin()
-            # Remove the "pinned" system message
             async for msg in channel.history(limit=1):
                 if msg.type == discord.MessageType.pins_add:
                     await msg.delete()
     except Exception as e:
-        print(f"Failed to update leaderboard: {e}")
+        print(f"Leaderboard update error: {e}")
 
-# ----------------- DISCORD EVENTS -----------------
+# ----------------- EVENTS -----------------
 @bot.event
 async def on_ready():
-    print(f"{bot.user} is online and ready!")
-    await update_leaderboard()  # Show empty board or existing one
+    print(f"{bot.user} is online — ready for Hunting Trap screenshots!")
+    await update_leaderboard()
 
 @bot.event
 async def on_message(message):
@@ -135,7 +125,6 @@ async def on_message(message):
             try:
                 data = await att.read()
                 players = await process_image(data)
-                
                 if players:
                     found_any = True
                     for norm_name, score, display_name in players:
@@ -143,23 +132,22 @@ async def on_message(message):
                         if score > old_score:
                             leaderboard[norm_name] = (score, display_name)
                             updated = True
-                            
             except Exception as e:
                 print(f"Error processing image: {e}")
 
-    # Reactions
+    # Correct emoji reactions using colon format
     if found_any:
         if updated:
-            await message.add_reaction("chart_with_upwards_trend")
+            await message.add_reaction(":chart_with_upwards_trend:")   # New high!
         else:
-            await message.add_reaction("white_check_mark")
+            await message.add_reaction(":white_check_mark:")           # Valid, no new high
         await update_leaderboard()
     else:
-        await message.add_reaction("question")
+        await message.add_reaction(":question:")                       # Couldn't read
 
     await bot.process_commands(message)
 
-# Admin command to clear leaderboard (optional)
+# Optional: clear leaderboard
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def clearlb(ctx):
@@ -169,11 +157,11 @@ async def clearlb(ctx):
     await update_leaderboard()
     await ctx.send("Leaderboard cleared!", delete_after=5)
 
-# ----------------- FLASK (keeps Render alive) -----------------
+# ----------------- FLASK -----------------
 app = Flask(__name__)
 @app.route('/')
 def home():
-    return "Hunting Trap Damage Leaderboard • Live & Ready", 200
+    return "Hunting Trap Damage Leaderboard • Running", 200
 
 if __name__ == '__main__':
     threading.Thread(target=lambda: bot.run(TOKEN), daemon=True).start()
