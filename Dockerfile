@@ -1,30 +1,28 @@
-# Official Python slim image (small + has apt)
-FROM python:3.11-slim
+# Use full Debian-based Python image (guaranteed to have all libs)
+FROM python:3.11
 
-# Install system packages: Tesseract OCR + OpenCV dependencies
+# Install Tesseract + OpenCV system dependencies
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     libtesseract-dev \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
 
-# Copy requirements first (better caching)
+# Copy and install Python packages
 COPY requirements.txt .
-
-# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the bot code
+# Copy bot code
 COPY bot.py .
 
-# Tell pytesseract where tesseract binary is (critical!)
-RUN python -c "import pytesseract; pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'"
-
-# Expose port for Render's health checks
+# Expose port for Render
 EXPOSE 10000
 
 # Start the bot
