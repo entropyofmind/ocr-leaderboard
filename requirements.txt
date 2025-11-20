@@ -1,5 +1,6 @@
-discord.py
-pytesseract
+discord.py>=2.3.0
 opencv-python-headless
-pillow
+pytesseract
 numpy
+flask
+python-dotenv
