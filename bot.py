@@ -8,7 +8,7 @@ import numpy as np
 import re
 from flask import Flask
 
-# Tesseract path for Render/Docker
+# Tesseract path
 pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
 
 # ================== CONFIG ==================
@@ -34,8 +34,7 @@ def preprocess_image(img):
     gray = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
     thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-    return thresh
+    return cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
 
 # ----------------- EXTRACT PLAYERS -----------------
 def extract_players(text):
@@ -76,9 +75,9 @@ async def update_leaderboard():
     else:
         top20 = sorted(leaderboard.items(), key=lambda x: x[1][0], reverse=True)[:20]
         embed = discord.Embed(title="Hunting Trap Damage Ranking", color=0x00ff00)
-        medals = ["1st_place_medal", "2nd_place_medal", "3rd_place_medal"] + [f"{i}." for i in range(4,21)]
         for i, (norm, (score, name)) in enumerate(top20):
-            embed.add_field(name=f"{medals[i]} **{score:,}**", value=f"`{name}`", inline=False)
+            medal = ["Gold medal", "Silver medal", "Bronze medal"][i] if i < 3 else f"{i+1}."
+            embed.add_field(name=f"{medal} **{score:,}**", value=f"`{name}`", inline=False)
         embed.set_footer(text=f"Tracking {len(leaderboard)} players")
         embed.timestamp = discord.utils.utcnow()
 
@@ -97,7 +96,7 @@ async def update_leaderboard():
 # ----------------- EVENTS -----------------
 @bot.event
 async def on_ready():
-    print(f"{bot.user} online — ready!")
+    print(f"{bot.user} is online!")
     await update_leaderboard()
 
 @bot.event
@@ -123,15 +122,17 @@ async def on_message(message):
             except Exception as e:
                 print(f"OCR error: {e}")
 
-    # REAL UNICODE EMOJIS — 100% WORKING
+    # REAL UNICODE EMOJIS — COPY-PASTE THIS EXACTLY
     if found:
         if updated:
             await message.add_reaction("New high score!")   # Gold medal
         else:
             await message.add_reaction("Valid!")            # Check mark
-        await update_leaderboard()
     else:
         await message.add_reaction("Failed")                # Cross mark
+
+    if found:
+        await update_leaderboard()
 
     await bot.process_commands(message)
 
@@ -139,7 +140,7 @@ async def on_message(message):
 app = Flask(__name__)
 @app.route('/')
 def home():
-    return "Bot is alive!", 200
+    return "Bot running!", 200
 
 if __name__ == '__main__':
     threading.Thread(target=lambda: bot.run(TOKEN), daemon=True).start()
