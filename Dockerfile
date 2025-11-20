@@ -1,6 +1,5 @@
 FROM python:3.11-slim
 
-# Prevent interactive tzdata prompt
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install system packages and Tesseract OCR
@@ -15,18 +14,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrender1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Working directory
 WORKDIR /app
 
-# Install Python dependencies first (cached layer)
+# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy all source files
+# Copy app
 COPY . .
 
-# Expose Flask port
+# Expose port (Render provides PORT env var)
 EXPOSE 10000
 
-# Start bot + webserver (both run inside bot.py)
 CMD ["python", "bot.py"]
