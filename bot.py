@@ -1,24 +1,33 @@
+import os
+import threading
 import discord
 from discord.ext import commands
 import pytesseract
 import cv2
 import numpy as np
 import re
-import asyncio
-import os
+from dotenv import load_dotenv
+from flask import Flask
 
-# ================== YOUR CHANNELS ==================
-CHANNEL_A_ID = 1428424023435513876   # Screenshots channel
-CHANNEL_B_ID = 1428424076162240702   # Leaderboard channel
+# ================== CONFIG ==================
+load_dotenv()  # Only for local testing – Render uses its own env vars
+
+TOKEN = os.getenv("DISCORD_TOKEN")
+if not TOKEN:
+    raise RuntimeError("DISCORD_TOKEN is missing! Set it in Render → Environment Variables.")
+
+CHANNEL_A_ID = 1428424023435513876  # Screenshots channel
+CHANNEL_B_ID = 1428424076162240702  # Leaderboard channel
 # ============================================
 
 intents = discord.Intents.default()
 intents.message_content = True
 intents.messages = True
-bot = commands.Bot(command_prefix="!", intents=intents)
 
-leaderboard = {}          # {user_id: (best_score, image_url, display_name)}
+bot = commands.Bot(command_prefix="!", intents=intents)
+leaderboard = {}  # {user_id: (best_score, image_url, display_name)}
 leaderboard_message = None
+
 
 def preprocess_image(img):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -34,18 +43,22 @@ def preprocess_image(img):
             best_text = text
     return best_text
 
+
 def extract_score_and_name(text):
     numbers = re.findall(r'\d{1,3}(?:[.,\s]?\d{3})*(?:[.,]\d+)?', text)
-    numbers = [int(n.replace(',', '').replace('.', '').replace(' ', '')) for n in numbers if n.replace(',', '').replace('.', '').replace(' ', '').isdigit()]
+    numbers = [int(n.replace(',', '').replace('.', '').replace(' ', '')) 
+               for n in numbers if n.replace(',', '').replace('.', '').replace(' ', '').isdigit()]
     if not numbers:
         return None, None
     score = max(numbers)
     if score < 100:
         return None, None
-
     lines = [l.strip() for l in text.split('\n') if l.strip()]
-    name = next((l[:30] for l in lines if len(l) > 2 and not str(score) in l and not l.replace(' ', '').replace('.', '').replace(',', '').isdigit()), None)
+    name = next((l[:30] for l in lines 
+                 if len(l) > 2 and str(score) not in l 
+                 and not l.replace(' ', '').replace('.', '').replace(',', '').isdigit()), None)
     return score, name or "Unknown Player"
+
 
 async def update_leaderboard():
     global leaderboard_message
@@ -65,7 +78,7 @@ async def update_leaderboard():
         for rank, (uid, (score, url, name)) in enumerate(sorted_lb, 1):
             member = bot.get_user(uid)
             display_name = member.display_name if member else name
-            medal = "crown" if rank == 1 else "2nd_place_medal" if rank == 2 else "3rd_place_medal" if rank == 3 else f"#{rank}"
+            medal = "crown" if rank == 1 else "2nd_place_medal" if rank == 2 else "3rd_place_medal" if rank == 3 else f"{rank}."
             embed.add_field(
                 name=f"{medal} **{score:,}**",
                 value=f"[{display_name}]({url})",
@@ -85,21 +98,21 @@ async def update_leaderboard():
                     await msg.delete()
     except Exception as e:
         print(f"Leaderboard update error: {e}")
-        leaderboard_message = await channel_b.send(embed=embed)
-        await leaderboard_message.pin()
+
 
 @bot.event
 async def on_ready():
     print(f"{bot.user} is online and scanning screenshots!")
     await update_leaderboard()
 
+
 @bot.event
 async def on_message(message):
     if message.channel.id != CHANNEL_A_ID or not message.attachments:
-        return
+        return await bot.process_commands(message)
 
     for att in message.attachments:
-        if att.filename.lower().endswith(('png', 'jpg', 'jpeg', 'webp')):
+        if att.filename.lower().endswith(('png', 'jpg', 'jpeg', 'webp', 'gif')):
             try:
                 data = await att.read()
                 nparr = np.frombuffer(data, np.uint8)
@@ -123,17 +136,35 @@ async def on_message(message):
                     await message.add_reaction("white_check_mark")
 
                 await update_leaderboard()
-
             except Exception as e:
                 print(f"Processing error: {e}")
                 await message.add_reaction("cross_mark")
 
     await bot.process_commands(message)
 
+
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def refresh(ctx):
     await update_leaderboard()
-    await ctx.send("Leaderboard refreshed!", delete_after=3)
+    await ctx.send("Leaderboard refreshed!", delete_after=5)
 
-bot.run(os.getenv("DISCORD_TOKEN"))
+
+# ================== FLASK WEB SERVER FOR RENDER ==================
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is alive and scanning screenshots!", 200
+
+def run_bot():
+    bot.run(TOKEN)
+
+if __name__ == '__main__':
+    # Start the Discord bot in a background thread
+    thread = threading.Thread(target=run_bot, daemon=True)
+    thread.start()
+    
+    # Start Flask (Render requires this to stay alive)
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
