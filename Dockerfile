@@ -1,7 +1,7 @@
-# Use full Debian-based Python image (guaranteed to have all libs)
+# Use full Debian-based Python image
 FROM python:3.11
 
-# Install Tesseract + OpenCV system dependencies
+# ----------------- INSTALL SYSTEM DEPENDENCIES -----------------
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     libtesseract-dev \
@@ -10,20 +10,28 @@ RUN apt-get update && apt-get install -y \
     libsm6 \
     libxext6 \
     libxrender-dev \
+    locales \
     && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
+# ----------------- CONFIGURE UTF-8 LOCALE (fix emojis) -----------------
+RUN locale-gen en_US.UTF-8
+ENV LANG=en_US.UTF-8
+ENV LANGUAGE=en_US:en
+ENV LC_ALL=en_US.UTF-8
+
+# ----------------- SET WORKDIR -----------------
 WORKDIR /app
 
-# Copy and install Python packages
+# ----------------- COPY FILES -----------------
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy bot code
 COPY bot.py .
 
-# Expose port for Render
+# ----------------- INSTALL PYTHON DEPENDENCIES -----------------
+RUN pip install --no-cache-dir --upgrade pip
+RUN pip install --no-cache-dir -r requirements.txt
+
+# ----------------- EXPOSE PORT FOR FLASK -----------------
 EXPOSE 10000
 
-# Start the bot
+# ----------------- START BOT -----------------
 CMD ["python", "bot.py"]
