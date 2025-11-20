@@ -1,5 +1,5 @@
-discord.py>=2.3.0
-flask
-opencv-python-headless
-pytesseract
-numpy
+discord.py==2.6.0
+flask==2.3.6
+opencv-python-headless==4.8.1.78
+pytesseract==0.3.10
+numpy==1.26.5
