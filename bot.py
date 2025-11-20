@@ -44,7 +44,7 @@ def extract_score_and_name(text):
         return None, None
 
     lines = [l.strip() for l in text.split('\n') if l.strip()]
-    name = next((l[:30] for l in lines if len(l)>2 and not str(score) in l and not l.replace(' ','').replace('.','').replace(',','').isdigit()), None)
+    name = next((l[:30] for l in lines if len(l) > 2 and not str(score) in l and not l.replace(' ', '').replace('.', '').replace(',', '').isdigit()), None)
     return score, name or "Unknown Player"
 
 async def update_leaderboard():
