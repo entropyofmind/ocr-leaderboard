@@ -1,7 +1,7 @@
-# Use full Debian-based Python image
+# Use Python 3.11
 FROM python:3.11
 
-# ----------------- INSTALL SYSTEM DEPENDENCIES -----------------
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     libtesseract-dev \
@@ -13,25 +13,25 @@ RUN apt-get update && apt-get install -y \
     locales \
     && rm -rf /var/lib/apt/lists/*
 
-# ----------------- CONFIGURE UTF-8 LOCALE (fix emojis) -----------------
+# Configure UTF-8 locale
 RUN locale-gen en_US.UTF-8
 ENV LANG=en_US.UTF-8
 ENV LANGUAGE=en_US:en
 ENV LC_ALL=en_US.UTF-8
 
-# ----------------- SET WORKDIR -----------------
+# Set working directory
 WORKDIR /app
 
-# ----------------- COPY FILES -----------------
+# Copy files
 COPY requirements.txt .
 COPY bot.py .
 
-# ----------------- INSTALL PYTHON DEPENDENCIES -----------------
+# Install Python packages
 RUN pip install --no-cache-dir --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
-# ----------------- EXPOSE PORT FOR FLASK -----------------
+# Expose Flask port
 EXPOSE 10000
 
-# ----------------- START BOT -----------------
+# Start bot
 CMD ["python", "bot.py"]
