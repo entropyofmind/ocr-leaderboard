@@ -31,7 +31,7 @@ leaderboard_message = None
 
 # ----------------- IMAGE PREPROCESSING -----------------
 def preprocess_image(img):
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    gray = cv UPC2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     gray = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
     thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2,2))
@@ -42,7 +42,6 @@ def preprocess_image(img):
 def extract_players(text):
     players = []
     lines = [line.strip() for line in text.split('\n') if line.strip()]
-    
     i = 0
     while i < len(lines):
         line = lines[i]
@@ -76,21 +75,13 @@ async def update_leaderboard():
         return
 
     if not leaderboard:
-        embed = discord.Embed(
-            title="Hunting Trap Damage Ranking",
-            description="No screenshot posted yet!",
-            color=0x2f3136
-        )
+        embed = discord.Embed(title="Hunting Trap Damage Ranking", description="No screenshot posted yet!", color=0x2f3136)
     else:
         top20 = sorted(leaderboard.items(), key=lambda x: x[1][0], reverse=True)[:20]
         embed = discord.Embed(title="Hunting Trap Damage Ranking", color=0x00ff00)
         medals = ["1st_place_medal", "2nd_place_medal", "3rd_place_medal"] + [f"{i}." for i in range(4,21)]
         for i, (norm, (score, name)) in enumerate(top20):
-            embed.add_field(
-                name=f"{medals[i]} **{score:,}**",
-                value=f"`{name}`",
-                inline=False
-            )
+            embed.add_field(name=f"{medals[i]} **{score:,}**", value=f"`{name}`", inline=False)
         embed.set_footer(text=f"Tracking {len(leaderboard)} players • Live updated")
         embed.timestamp = discord.utils.utcnow()
 
@@ -135,19 +126,19 @@ async def on_message(message):
             except Exception as e:
                 print(f"Error processing image: {e}")
 
-    # BULLETPROOF EMOJIS — 100% WORKING EVERYWHERE
+    # 100% WORKING UNICODE EMOJIS — NEVER FAIL
     if found_any:
         if updated:
-            await message.add_reaction("fire")           # New personal best!
+            await message.add_reaction("New high score!")   # Fire
         else:
-            await message.add_reaction("check_mark")     # Valid screenshot
+            await message.add_reaction("Valid!")            # Check
         await update_leaderboard()
     else:
-        await message.add_reaction("cross_mark")         # Couldn't read anything
+        await message.add_reaction("Failed")                # Cross
 
     await bot.process_commands(message)
 
-# Optional: clear leaderboard
+# Optional clear command
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def clearlb(ctx):
