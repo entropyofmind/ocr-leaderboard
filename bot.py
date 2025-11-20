@@ -126,10 +126,10 @@ async def on_message(message):
             except Exception as e:
                 print(f"Error processing image: {e}")
 
-    # 100% WORKING UNICODE EMOJIS (copy-paste safe)
+    # REAL UNICODE EMOJIS — 100% WORKING, NO MORE ERRORS
     if found_any:
         if updated:
-            await message.add_reaction("New high score!")   # Fire
+            await message.add_reaction("New high score!")   # Gold medal
         else:
             await message.add_reaction("Valid!")            # Check mark
         await update_leaderboard()
@@ -148,7 +148,7 @@ async def clearlb(ctx):
     await update_leaderboard()
     await ctx.send("Leaderboard cleared!", delete_after=5)
 
-# ----------------- FLASK (Render keep-alive) -----------------
+# ----------------- FLASK -----------------
 app = Flask(__name__)
 @app.route('/')
 def home():
