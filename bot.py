@@ -16,7 +16,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN missing!")
 
-CHANNEL_A_ID = 1428424023435513876   # Where people post screenshots
+CHANNEL_A_ID = 1428424023435513876   # Screenshot channel
 CHANNEL_B_ID = 1428424076162240702   # Leaderboard channel
 
 intents = discord.Intents.default()
@@ -27,7 +27,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 leaderboard = {}        # normalized_name: (best_score, original_name)
 leaderboard_message = None
 
-# ----------------- BEST PREPROCESSING FOR YOUR GAME -----------------
+# ----------------- IMAGE PREPROCESSING -----------------
 def preprocess_image(img):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     gray = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
@@ -36,7 +36,7 @@ def preprocess_image(img):
     thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
     return thresh
 
-# ----------------- EXTRACT PLAYERS FROM YOUR EXACT LAYOUT -----------------
+# ----------------- EXTRACT PLAYERS -----------------
 def extract_players(text):
     players = []
     lines = [line.strip() for line in text.split('\n') if line.strip()]
@@ -63,7 +63,7 @@ def extract_players(text):
         i += 1
     return players
 
-# ----------------- PROCESS ONE IMAGE -----------------
+# ----------------- PROCESS IMAGE -----------------
 async def process_image(data):
     nparr = np.frombuffer(data, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -73,7 +73,7 @@ async def process_image(data):
     text = pytesseract.image_to_string(preprocessed, config='--psm 6')
     return extract_players(text)
 
-# ----------------- UPDATE LEADERBOARD EMBED -----------------
+# ----------------- UPDATE LEADERBOARD -----------------
 async def update_leaderboard():
     global leaderboard_message
     channel = bot.get_channel(CHANNEL_B_ID)
@@ -85,11 +85,10 @@ async def update_leaderboard():
     else:
         top20 = sorted(leaderboard.items(), key=lambda x: x[1][0], reverse=True)[:20]
         embed = discord.Embed(title="Top 20 Damage Ranking", color=0x00ff00)
-        medals = ["1st_place_medal", "2nd_place_medal", "3rd_place_medal"] + [f"{i}." for i in range(4,21)]
-        for i, (norm, (score, name)) in enumerate(top20):
+        for i, (norm, (score, name)) in enumerate(top20, start=1):
             embed.add_field(
-                name=f"{medals[i]} **{score:,}**",
-                value=f"`{name}`",
+                name=f"{i}. {name}",
+                value=f"**{name}** ({score:,} Damage Points)",
                 inline=False
             )
         embed.set_footer(text=f"Total tracked: {len(leaderboard)} players • Updated")
@@ -104,10 +103,10 @@ async def update_leaderboard():
     except Exception as e:
         print(f"Embed error: {e}")
 
-# ----------------- LOAD LAST IMAGE ON STARTUP -----------------
+# ----------------- LOAD LAST IMAGE -----------------
 async def load_last_image():
     channel = bot.get_channel(CHANNEL_A_ID)
-    async for msg in channel.history(limit=50):  # check last 50 messages for image
+    async for msg in channel.history(limit=50):  # check last 50 messages
         if msg.attachments:
             for att in msg.attachments:
                 if att.filename.lower().split('.')[-1] in {'png','jpg','jpeg','webp'}:
@@ -117,7 +116,6 @@ async def load_last_image():
                         for norm, score, name in players:
                             if score > leaderboard.get(norm, (0, ""))[0]:
                                 leaderboard[norm] = (score, name)
-                        print("Loaded last screenshot for leaderboard")
                         await update_leaderboard()
                         return
                     except Exception as e:
@@ -153,17 +151,16 @@ async def on_message(message):
                 print(f"OCR error: {e}")
 
     if valid:
-        await message.add_reaction("chart_with_upwards_trend" if updated else "white_check_mark")
+        # Optionally add a simple acknowledgment
+        await message.add_reaction("✅")
         await update_leaderboard()
-    else:
-        await message.add_reaction("question")
 
     await bot.process_commands(message)
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def rebuild(ctx):
-    await ctx.send("Manual rebuild command: currently only uses last 50 screenshots")
+    await ctx.send("Manual rebuild: only last 50 screenshots")
     await load_last_image()
     await ctx.send("Done!")
 
