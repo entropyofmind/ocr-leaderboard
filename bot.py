@@ -1,12 +1,12 @@
 # bot.py
 import os
 import re
+import asyncio
 import discord
 from discord.ext import commands
 import pytesseract
 import cv2
 from collections import defaultdict
-import asyncio
 from rapidfuzz import fuzz
 
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -22,116 +22,95 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ------------------- Memory -------------------
-leaderboard_memory = {}  # player_name -> damage
+leaderboard_memory = {}
+last_leaderboard_msg = None
 
+def normalize_name(name: str) -> str:
+    return " ".join(name.strip().split())
 
-# ------------------- Utilities -------------------
-
-def normalize_name(name):
-    name = " ".join(name.strip().split())
-    name = re.sub(r"^[^\w\u4e00-\u9fff]+", "", name)
-    return name
-
-
-def remove_emojis(text):
-    emoji_pattern = re.compile(
-        "[" 
-        "\U0001F1E0-\U0001F1FF"
-        "\U0001F300-\U0001F5FF"
-        "\U0001F600-\U0001F64F"
-        "\U0001F680-\U0001F6FF"
-        "\U0001F700-\U0001F77F"
-        "\U0001F780-\U0001F7FF"
-        "\U0001F800-\U0001F8FF"
-        "\U0001F900-\U0001F9FF"
-        "\U0001FA00-\U0001FA6F"
-        "\U0001FA70-\U0001FAFF"
-        "\u2600-\u26FF\u2700-\u27BF"
-        "]+", flags=re.UNICODE)
-    return emoji_pattern.sub(r'', text)
-
-
-# ------------------- OCR -------------------
-
-def extract_text_raw(path):
-    """Return all OCR'd text as a single string for bracket detection."""
+def extract_text_raw(path: str) -> str:
     img = cv2.imread(path)
+    if img is None:
+        return ""
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    data = pytesseract.image_to_string(gray, lang='chi_sim+eng')
-    return data
+    try:
+        text = pytesseract.image_to_string(gray, lang='chi_sim+eng')
+    except Exception:
+        text = pytesseract.image_to_string(gray)
+    return text or ""
 
-
-def extract_leaderboard_from_image(path):
+def extract_leaderboard_from_image(path: str) -> dict:
+    results = {}
     img = cv2.imread(path)
+    if img is None:
+        return results
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    data = pytesseract.image_to_data(thresh, output_type=pytesseract.Output.DICT, lang='chi_sim+eng')
-
+    try:
+        data = pytesseract.image_to_data(thresh, output_type=pytesseract.Output.DICT, lang='chi_sim+eng')
+    except Exception:
+        data = pytesseract.image_to_data(thresh, output_type=pytesseract.Output.DICT)
     lines = defaultdict(list)
-    for i in range(len(data['text'])):
-        text = data['text'][i].strip()
-        conf = int(data['conf'][i])
+    n = len(data.get('text', []))
+    for i in range(n):
+        text = (data['text'][i] or "").strip()
+        conf_raw = data['conf'][i]
+        try:
+            conf = int(float(conf_raw))
+        except Exception:
+            try:
+                conf = int(conf_raw)
+            except Exception:
+                conf = -1
         if not text or conf < 40:
             continue
         y = data['top'][i]
-        lines[y // 15].append((data['left'][i], text))
-
+        left = data['left'][i]
+        lines[y // 15].append((left, text))
     sorted_lines = [sorted(words, key=lambda t: t[0]) for _, words in sorted(lines.items())]
-
-    results = {}
     prev_name = None
-
-    for line in sorted_lines:
-        line_text = " ".join(word for _, word in line).strip()
-
-        match = re.search(r"Damage Points[:\s]*([\d\s,]+)", line_text, re.IGNORECASE)
-        if match and prev_name:
-            damage_str = match.group(1).replace(" ", "").replace(",", "")
+    for words in sorted_lines:
+        line_text = " ".join(w for _, w in words).strip()
+        if not line_text:
+            continue
+        dp_match = re.search(r"Damage Points[:\s]*([\d\s,]+)", line_text, re.IGNORECASE)
+        if dp_match and prev_name:
+            damage_str = dp_match.group(1).replace(" ", "").replace(",", "")
             try:
                 damage = int(damage_str)
                 player = normalize_name(prev_name)
                 results[player] = damage
-            except ValueError:
+            except Exception:
                 pass
             prev_name = None
         else:
             prev_name = line_text
-
     return results
 
-
-# ------------------- Fuzzy Merge -------------------
-
-def merge_with_memory(extracted):
+def merge_with_memory(extracted: dict, threshold: int = 90):
     global leaderboard_memory
-    for new_player, new_dmg in extracted.items():
-        new_player = normalize_name(new_player)
+    for raw_name, dmg in extracted.items():
+        new_name = normalize_name(raw_name)
         matched = False
-        for existing_player in leaderboard_memory:
-            ratio = fuzz.ratio(new_player.lower(), existing_player.lower())
-            if ratio >= 90:
-                leaderboard_memory[existing_player] = max(
-                    leaderboard_memory[existing_player],
-                    new_dmg
-                )
+        if new_name in leaderboard_memory:
+            leaderboard_memory[new_name] = max(leaderboard_memory[new_name], dmg)
+            continue
+        for exist in list(leaderboard_memory.keys()):
+            try:
+                score = fuzz.ratio(new_name.lower(), exist.lower())
+            except Exception:
+                score = 0
+            if score >= threshold:
+                leaderboard_memory[exist] = max(leaderboard_memory[exist], dmg)
                 matched = True
                 break
         if not matched:
-            leaderboard_memory[new_player] = new_dmg
+            leaderboard_memory[new_name] = dmg
 
-
-# ------------------- Formatting -------------------
-
-def format_leaderboard(result_dict, add_emojis=False, top_n=50):
+def format_leaderboard(result_dict: dict, add_emojis: bool = False, top_n: int = 50) -> str:
     sorted_list = sorted(result_dict.items(), key=lambda x: x[1], reverse=True)[:top_n]
     medals = ["🥇", "🥈", "🥉"]
-    number_emoji = {
-        "0": "0️⃣", "1": "1️⃣", "2": "2️⃣", "3": "3️⃣", "4": "4️⃣",
-        "5": "5️⃣", "6": "6️⃣", "7": "7️⃣", "8": "8️⃣", "9": "9️⃣"
-    }
-
+    number_emoji = {"0":"0️⃣","1":"1️⃣","2":"2️⃣","3":"3️⃣","4":"4️⃣","5":"5️⃣","6":"6️⃣","7":"7️⃣","8":"8️⃣","9":"9️⃣"}
     lines = []
     for idx, (name, dmg) in enumerate(sorted_list):
         if add_emojis:
@@ -143,13 +122,9 @@ def format_leaderboard(result_dict, add_emojis=False, top_n=50):
             lines.append(f"{prefix} {name} — {dmg}")
         else:
             lines.append(f"{name} — {dmg}")
-
     return "\n".join(lines)
 
-
-# ------------------- Permissions -------------------
-
-def can_reset(member):
+def can_reset(member: discord.Member) -> bool:
     if member.guild_permissions.administrator:
         return True
     for role in member.roles:
@@ -157,92 +132,81 @@ def can_reset(member):
             return True
     return False
 
-
-# ------------------- Commands -------------------
-
 @bot.command(name="reset_leaderboard")
 async def reset_leaderboard(ctx):
     if not can_reset(ctx.author):
         await ctx.send("❌ You do not have permission to reset the leaderboard.")
         return
-
-    global leaderboard_memory
+    global leaderboard_memory, last_leaderboard_msg
     leaderboard_memory = {}
-
+    last_leaderboard_msg = None
     post_channel = bot.get_channel(POST_CHANNEL_ID)
     if post_channel:
-        async for msg in post_channel.history(limit=100):
-            if msg.author == bot.user and "📊 OCR Leaderboard Results" in msg.content:
-                await msg.delete()
+        async for m in post_channel.history(limit=200):
+            if m.author == bot.user and "📊 OCR Leaderboard Results" in m.content:
+                try: await m.delete()
+                except Exception: pass
         await post_channel.send("✅ Leaderboard has been reset.")
-
 
 @bot.command(name="reset_memory")
 async def reset_memory(ctx):
     if not can_reset(ctx.author):
         await ctx.send("❌ You do not have permission to reset memory.")
         return
-
     global leaderboard_memory
     leaderboard_memory = {}
     await ctx.send("✅ Leaderboard memory cleared.")
 
-
-# ------------------- Events -------------------
-
 @bot.event
-async def on_message(message):
+async def on_message(message: discord.Message):
+    global last_leaderboard_msg
     await bot.process_commands(message)
-
-    if message.channel.id != WATCH_CHANNEL_ID or message.author == bot.user:
+    if message.author == bot.user or message.channel.id != WATCH_CHANNEL_ID:
         return
-
-    image_att = next(
-        (att for att in message.attachments if att.filename.lower().endswith((".png", ".jpg", ".jpeg"))),
-        None
-    )
-
+    image_att = next((att for att in message.attachments if att.filename.lower().endswith((".png",".jpg",".jpeg"))), None)
     if not image_att:
         return
-
     temp_file = "latest.png"
-    await image_att.save(temp_file)
+    try:
+        await image_att.save(temp_file)
+        raw_text = extract_text_raw(temp_file) or ""
+        if "[" in raw_text or "]" in raw_text:
+            try: await message.add_reaction("❌")
+            except: pass
+            warn = await message.channel.send(
+                "❌ **Image invalid.** Please upload a screenshot from alliance mail and crop out everything except player names and damage values."
+            )
+            await asyncio.sleep(10)
+            try: await warn.delete()
+            except: pass
+            return
+        extracted = extract_leaderboard_from_image(temp_file)
+        if not extracted:
+            try: await message.add_reaction("❌")
+            except: pass
+            await message.channel.send("❌ OCR failed or no players detected.")
+            return
+        merge_with_memory(extracted)
+        post_channel = bot.get_channel(POST_CHANNEL_ID)
+        if not post_channel:
+            return
+        if last_leaderboard_msg:
+            try: await last_leaderboard_msg.delete()
+            except: pass
+            last_leaderboard_msg = None
+        formatted_clean = format_leaderboard(leaderboard_memory, add_emojis=False)
+        last_leaderboard_msg = await post_channel.send(f"**📊 OCR Leaderboard Results**\n{formatted_clean}")
+        await asyncio.sleep(2)
+        formatted_emojis = format_leaderboard(leaderboard_memory, add_emojis=True)
+        try: await last_leaderboard_msg.edit(content=f"**📊 OCR Leaderboard Results**\n{formatted_emojis}")
+        except: pass
+    finally:
+        try:
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+        except: pass
 
-    # ⛔ FIRST: Extract raw OCR to detect brackets
-    raw_text = extract_text_raw(temp_file)
-
-    # REJECT IF ANY BRACKET EXISTS ANYWHERE
-    if "[" in raw_text or "]" in raw_text:
-        await message.add_reaction("❌")
-        warning = await message.channel.send(
-            "❌ **Image invalid.** Please upload a screenshot from alliance mail and crop out everything except player names and damage values."
-        )
-        await asyncio.sleep(10)
-        await warning.delete()
-        os.remove(temp_file)
-        return
-
-    # Continue only if no brackets detected
-    extracted = extract_leaderboard_from_image(temp_file)
-    os.remove(temp_file)
-
-    if not extracted:
-        await message.channel.send("❌ OCR failed or no players detected.")
-        return
-
-    # Merge
-    merge_with_memory(extracted)
-
-    # Post clean version
-    formatted_clean = format_leaderboard(leaderboard_memory, add_emojis=False)
-    post_channel = bot.get_channel(POST_CHANNEL_ID)
-
-    msg = await post_channel.send(f"**📊 OCR Leaderboard Results**\n{formatted_clean}")
-
-    # Add emoji version after 2 sec
-    await asyncio.sleep(2)
-    formatted_emojis = format_leaderboard(leaderboard_memory, add_emojis=True)
-    await msg.edit(content=f"**📊 OCR Leaderboard Results**\n{formatted_emojis}")
-
-
-bot.run(TOKEN)
+if __name__ == "__main__":
+    if not TOKEN:
+        raise RuntimeError("DISCORD_TOKEN environment variable required.")
+    bot.run(TOKEN)
