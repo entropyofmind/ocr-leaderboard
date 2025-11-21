@@ -72,8 +72,11 @@ def extract_leaderboard_from_image(path):
     prev_name = None
     for line in sorted_lines:
         line_text = " ".join(word for _, word in line).strip()
-        if line_text.startswith("["):  # only consider lines starting with "["
-            prev_name = line_text.strip()  # keep full name including brackets
+        
+        # Match player names starting with [ ] (case-insensitive, preserves full brackets)
+        name_match = re.match(r"\[[^\]]+\].+", line_text)
+        if name_match:
+            prev_name = name_match.group(0).strip()
         elif "Damage Points" in line_text and prev_name:
             match = re.search(r"Damage Points[:\s]*([\d\s,]+)", line_text, re.IGNORECASE)
             if match:
