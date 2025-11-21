@@ -2,10 +2,11 @@
 import os
 import re
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import pytesseract
 import cv2
 from collections import defaultdict
+import asyncio
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 WATCH_CHANNEL_ID = 1441385260171661325  # channel to watch for screenshots
@@ -20,13 +21,15 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# ------------------- Memory -------------------
+leaderboard_memory = {}  # player_name -> damage
+
 # ------------------- Utilities -------------------
 
 def normalize_name(name):
     """Normalize player names to prevent duplicates."""
     name = " ".join(name.strip().split())  # remove extra spaces
-    # Remove any leading/trailing punctuation/digits
-    name = re.sub(r"^[^\w\u4e00-\u9fff]+", "", name)
+    name = re.sub(r"^[^\w\u4e00-\u9fff]+", "", name)  # strip leading non-name chars
     return name
 
 def remove_emojis(text):
@@ -85,34 +88,9 @@ def extract_leaderboard_from_image(path):
             prev_name = line_text
     return results
 
-# ------------------- Leaderboard Parsing -------------------
-
-def parse_leaderboard_message(msg_content):
-    leaderboard_dict = {}
-    lines = msg_content.splitlines()[1:]  # skip header
-    for line in lines:
-        line = line.strip()
-        if not line or "—" not in line:
-            continue
-        # Remove all emojis from the entire line
-        line = remove_emojis(line)
-        # Remove any remaining leading non-name chars
-        line = re.sub(r"^[^\w\u4e00-\u9fff]+", "", line)
-        parts = line.rsplit("—", 1)
-        if len(parts) != 2:
-            continue
-        name, dmg = parts
-        name = normalize_name(name)
-        try:
-            dmg = int(re.sub(r"[^\d]", "", dmg.strip()))
-            leaderboard_dict[name] = dmg
-        except ValueError:
-            continue
-    return leaderboard_dict
-
 # ------------------- Formatting -------------------
 
-def format_leaderboard(result_dict, top_n=50):
+def format_leaderboard(result_dict, add_emojis=False, top_n=50):
     sorted_list = sorted(result_dict.items(), key=lambda x: x[1], reverse=True)[:top_n]
     medals = ["🥇", "🥈", "🥉"]
     number_emoji = {
@@ -121,12 +99,15 @@ def format_leaderboard(result_dict, top_n=50):
     }
     lines = []
     for idx, (name, dmg) in enumerate(sorted_list):
-        if idx < 3:
-            prefix = medals[idx]
+        if add_emojis:
+            if idx < 3:
+                prefix = medals[idx]
+            else:
+                rank = str(idx + 1)
+                prefix = "".join(number_emoji[d] for d in rank)
+            lines.append(f"{prefix} {name} — {dmg}")
         else:
-            rank = str(idx + 1)
-            prefix = "".join(number_emoji[d] for d in rank)
-        lines.append(f"{prefix} {name} — {dmg}")
+            lines.append(f"{name} — {dmg}")
     return "\n".join(lines)
 
 # ------------------- Permissions -------------------
@@ -139,28 +120,23 @@ def can_reset(member):
             return True
     return False
 
-# ------------------- Bot Functions -------------------
-
-async def get_latest_leaderboard_message():
-    post_channel = bot.get_channel(POST_CHANNEL_ID)
-    if not post_channel:
-        return None, {}
-    async for msg in post_channel.history(limit=100):
-        if msg.author == bot.user and "📊 OCR Leaderboard Results" in msg.content:
-            return msg, parse_leaderboard_message(msg.content)
-    return None, {}
+# ------------------- Bot Commands -------------------
 
 @bot.command(name="reset_leaderboard")
 async def reset_leaderboard(ctx):
     if not can_reset(ctx.author):
         await ctx.send("❌ You do not have permission to reset the leaderboard.")
         return
+    global leaderboard_memory
+    leaderboard_memory = {}
     post_channel = bot.get_channel(POST_CHANNEL_ID)
     if post_channel:
-        msg, _ = await get_latest_leaderboard_message()
-        if msg:
-            await msg.delete()
+        async for msg in post_channel.history(limit=100):
+            if msg.author == bot.user and "📊 OCR Leaderboard Results" in msg.content:
+                await msg.delete()
         await post_channel.send("✅ Leaderboard has been reset.")
+
+# ------------------- Bot Event -------------------
 
 @bot.event
 async def on_message(message):
@@ -173,7 +149,6 @@ async def on_message(message):
         if att.filename.lower().endswith((".png", ".jpg", ".jpeg")):
             temp_file = "latest.png"
             await att.save(temp_file)
-
             extracted = extract_leaderboard_from_image(temp_file)
             os.remove(temp_file)
 
@@ -181,21 +156,23 @@ async def on_message(message):
                 await message.channel.send("❌ OCR failed or no players detected.")
                 return
 
-            # Get latest leaderboard
-            latest_msg, current_leaderboard = await get_latest_leaderboard_message()
-
-            # Merge extracted data with old leaderboard
+            # Merge new screenshot data into memory
+            global leaderboard_memory
             for player, dmg in extracted.items():
                 player = normalize_name(player)
-                current_leaderboard[player] = max(current_leaderboard.get(player, 0), dmg)
+                leaderboard_memory[player] = max(leaderboard_memory.get(player, 0), dmg)
 
-            formatted = format_leaderboard(current_leaderboard, top_n=50)
-
+            # Post clean leaderboard (no emojis)
+            formatted_clean = format_leaderboard(leaderboard_memory, add_emojis=False)
             post_channel = bot.get_channel(POST_CHANNEL_ID)
-            if post_channel:
-                if latest_msg:
-                    await latest_msg.edit(content=f"**📊 OCR Leaderboard Results**\n{formatted}")
-                else:
-                    await post_channel.send(f"**📊 OCR Leaderboard Results**\n{formatted}")
+            if not post_channel:
+                return
+
+            msg = await post_channel.send(f"**📊 OCR Leaderboard Results**\n{formatted_clean}")
+
+            # Wait 2 seconds, then edit to add emojis
+            await asyncio.sleep(2)
+            formatted_emojis = format_leaderboard(leaderboard_memory, add_emojis=True)
+            await msg.edit(content=f"**📊 OCR Leaderboard Results**\n{formatted_emojis}")
 
 bot.run(TOKEN)
