@@ -36,7 +36,6 @@ def extract_leaderboard_from_image(path):
     # OCR with Unicode support
     data = pytesseract.image_to_data(thresh, output_type=pytesseract.Output.DICT, lang='chi_sim+eng')
 
-    # Group text by Y-coordinate (line)
     lines = defaultdict(list)
     for i in range(len(data['text'])):
         text = data['text'][i].strip()
@@ -60,14 +59,14 @@ def extract_leaderboard_from_image(path):
                 player = normalize_name(prev_name)
                 results[player] = damage
             except ValueError:
-                pass  # skip invalid numbers
+                pass
             prev_name = None
         else:
             prev_name = line_text
     return results
 
 def format_leaderboard(result_dict):
-    """Format leaderboard with emojis for top 3, numbers for rest"""
+    """Format leaderboard with emojis for top 3, numbers for the rest"""
     sorted_list = sorted(result_dict.items(), key=lambda x: x[1], reverse=True)
     medals = ["🥇", "🥈", "🥉"]
     lines = []
@@ -85,29 +84,37 @@ def can_reset(member):
             return True
     return False
 
+def parse_leaderboard_message(msg_content):
+    """Parse a previous leaderboard message into {player: damage}"""
+    leaderboard_dict = {}
+    lines = msg_content.splitlines()[1:]  # skip header
+    for line in lines:
+        line = line.strip()
+        if not line or "—" not in line:
+            continue
+        # Remove emoji or number prefix
+        line = re.sub(r"^[^\w\d]*", "", line)
+        # Split by last '—' to keep names with dashes intact
+        parts = line.rsplit("—", 1)
+        if len(parts) != 2:
+            continue
+        name, dmg = parts
+        name = normalize_name(name)
+        try:
+            dmg = int(re.sub(r"[^\d]", "", dmg.strip()))
+            leaderboard_dict[name] = dmg
+        except ValueError:
+            continue
+    return leaderboard_dict
+
 async def read_latest_leaderboard():
-    """Read the last leaderboard posted in POST_CHANNEL_ID"""
+    """Read the latest leaderboard message from POST_CHANNEL_ID"""
     post_channel = bot.get_channel(POST_CHANNEL_ID)
     if not post_channel:
         return {}
     async for msg in post_channel.history(limit=50):
         if msg.author == bot.user and "📊 OCR Leaderboard Results" in msg.content:
-            leaderboard_dict = {}
-            lines = msg.content.splitlines()[1:]  # skip header
-            for line in lines:
-                line = line.strip()
-                if not line or "—" not in line:
-                    continue
-                # Remove prefix/emoji
-                line = re.sub(r"^[^\w\d]*", "", line)
-                try:
-                    name, dmg = line.split("—", 1)
-                    name = normalize_name(name)
-                    dmg = int(re.sub(r"[^\d]", "", dmg.strip()))
-                    leaderboard_dict[name] = dmg
-                except ValueError:
-                    continue
-            return leaderboard_dict
+            return parse_leaderboard_message(msg.content)
     return {}
 
 @bot.command(name="reset_leaderboard")
@@ -117,11 +124,11 @@ async def reset_leaderboard(ctx):
         return
     post_channel = bot.get_channel(POST_CHANNEL_ID)
     if post_channel:
-        await post_channel.send("✅ Leaderboard has been reset.")
-        # Optionally delete previous leaderboard messages
+        # Delete previous leaderboard messages
         async for msg in post_channel.history(limit=50):
             if msg.author == bot.user and "📊 OCR Leaderboard Results" in msg.content:
                 await msg.delete()
+        await post_channel.send("✅ Leaderboard has been reset.")
 
 @bot.event
 async def on_message(message):
@@ -142,17 +149,15 @@ async def on_message(message):
                 await message.channel.send("❌ OCR failed or no players detected.")
                 return
 
-            # Read existing leaderboard
+            # Read the most recent leaderboard
             current_leaderboard = await read_latest_leaderboard()
 
-            # Merge extracted data with existing leaderboard
+            # Merge extracted with existing leaderboard, keep highest damage
             for player, dmg in extracted.items():
                 player = normalize_name(player)
-                if player in current_leaderboard:
-                    current_leaderboard[player] = max(current_leaderboard[player], dmg)
-                else:
-                    current_leaderboard[player] = dmg
+                current_leaderboard[player] = max(current_leaderboard.get(player, 0), dmg)
 
+            # Post updated leaderboard
             formatted = format_leaderboard(current_leaderboard)
             post_channel = bot.get_channel(POST_CHANNEL_ID)
             if post_channel:
