@@ -1,5 +1,5 @@
-discord.py
-paddleocr
-opencv-python-headless
-rapidfuzz
-numpy
+numpy==1.26.4
+discord.py==2.6.0
+opencv-python-headless==4.8.1.78
+pytesseract==0.3.10
+rapidfuzz==2.15.1
