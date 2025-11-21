@@ -1,3 +1,4 @@
 discord.py
 pytesseract
-opencv-python-headless
+opencv-python
+rapidfuzz
