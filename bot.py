@@ -46,9 +46,11 @@ def extract_leaderboard(path):
     for line in sorted_lines:
         line_text = " ".join(word for _, word in line).strip()
         # Detect damage line
-        match = re.search(r"Damage Points[:\s]*([\d]+)", line_text, re.IGNORECASE)
+        match = re.search(r"Damage Points[:\s]*([\d\s,]+)", line_text, re.IGNORECASE)
         if match and prev_name:
-            damage = int(match.group(1))
+            # Remove spaces or commas inside the number
+            damage_str = match.group(1).replace(" ", "").replace(",", "")
+            damage = int(damage_str)
             # Merge duplicates, keep highest damage
             results[prev_name] = max(results.get(prev_name, 0), damage)
             prev_name = None  # reset for next player
