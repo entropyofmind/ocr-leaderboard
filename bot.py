@@ -8,7 +8,7 @@ import cv2
 from collections import defaultdict
 
 TOKEN = os.getenv("DISCORD_TOKEN")
-WATCH_CHANNEL_ID = 1441385260171661325  # channel to listen for new screenshots
+WATCH_CHANNEL_ID = 1441385260171661325  # channel to watch for screenshots
 POST_CHANNEL_ID = 1441385329440460902   # channel to post leaderboard
 ALLOWED_RESET_ROLES = ["R5", "R4"]
 
@@ -20,16 +20,20 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+def normalize_name(name):
+    """Normalize player names to prevent duplicates"""
+    return " ".join(name.strip().split())
+
 def extract_leaderboard_from_image(path):
     """
-    OCR function to extract player names and their damage points from screenshot.
-    Handles Unicode characters (Chinese, parentheses, etc.).
+    OCR function to extract player names and damage points.
+    Handles Unicode names including Chinese characters and parentheses.
     """
     img = cv2.imread(path)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-    # Use Tesseract with Unicode recognition
+    # OCR with Unicode support
     data = pytesseract.image_to_data(thresh, output_type=pytesseract.Output.DICT, lang='chi_sim+eng')
 
     # Group text by Y-coordinate (line)
@@ -51,15 +55,19 @@ def extract_leaderboard_from_image(path):
         match = re.search(r"Damage Points[:\s]*([\d\s,]+)", line_text, re.IGNORECASE)
         if match and prev_name:
             damage_str = match.group(1).replace(" ", "").replace(",", "")
-            damage = int(damage_str)
-            results[prev_name] = damage
+            try:
+                damage = int(damage_str)
+                player = normalize_name(prev_name)
+                results[player] = damage
+            except ValueError:
+                pass  # skip invalid numbers
             prev_name = None
         else:
             prev_name = line_text
     return results
 
 def format_leaderboard(result_dict):
-    """Format leaderboard with emojis for top 3, numbers for the rest"""
+    """Format leaderboard with emojis for top 3, numbers for rest"""
     sorted_list = sorted(result_dict.items(), key=lambda x: x[1], reverse=True)
     medals = ["🥇", "🥈", "🥉"]
     lines = []
@@ -78,7 +86,7 @@ def can_reset(member):
     return False
 
 async def read_latest_leaderboard():
-    """Reads the latest leaderboard message from POST_CHANNEL_ID"""
+    """Read the last leaderboard posted in POST_CHANNEL_ID"""
     post_channel = bot.get_channel(POST_CHANNEL_ID)
     if not post_channel:
         return {}
@@ -87,14 +95,18 @@ async def read_latest_leaderboard():
             leaderboard_dict = {}
             lines = msg.content.splitlines()[1:]  # skip header
             for line in lines:
-                # Remove emoji or numbering
-                line = re.sub(r"^[^\w\d]*", "", line)
-                if "—" not in line:
+                line = line.strip()
+                if not line or "—" not in line:
                     continue
-                name, dmg = line.split("—", 1)
-                name = name.strip()
-                dmg = int(re.sub(r"[^\d]", "", dmg.strip()))
-                leaderboard_dict[name] = dmg
+                # Remove prefix/emoji
+                line = re.sub(r"^[^\w\d]*", "", line)
+                try:
+                    name, dmg = line.split("—", 1)
+                    name = normalize_name(name)
+                    dmg = int(re.sub(r"[^\d]", "", dmg.strip()))
+                    leaderboard_dict[name] = dmg
+                except ValueError:
+                    continue
             return leaderboard_dict
     return {}
 
@@ -106,14 +118,14 @@ async def reset_leaderboard(ctx):
     post_channel = bot.get_channel(POST_CHANNEL_ID)
     if post_channel:
         await post_channel.send("✅ Leaderboard has been reset.")
-    # Optionally delete the last bot leaderboard messages
-    async for msg in post_channel.history(limit=50):
-        if msg.author == bot.user and "📊 OCR Leaderboard Results" in msg.content:
-            await msg.delete()
+        # Optionally delete previous leaderboard messages
+        async for msg in post_channel.history(limit=50):
+            if msg.author == bot.user and "📊 OCR Leaderboard Results" in msg.content:
+                await msg.delete()
 
 @bot.event
 async def on_message(message):
-    await bot.process_commands(message)  # process commands
+    await bot.process_commands(message)
 
     if message.channel.id != WATCH_CHANNEL_ID or message.author == bot.user:
         return
@@ -123,22 +135,24 @@ async def on_message(message):
             temp_file = "latest.png"
             await att.save(temp_file)
 
-            # Extract leaderboard from screenshot
             extracted = extract_leaderboard_from_image(temp_file)
-            os.remove(temp_file)  # Clean up temp image
+            os.remove(temp_file)
 
             if not extracted:
                 await message.channel.send("❌ OCR failed or no players detected.")
                 return
 
-            # Read latest leaderboard from POST_CHANNEL_ID
+            # Read existing leaderboard
             current_leaderboard = await read_latest_leaderboard()
 
-            # Merge extracted with existing, keeping highest damage
+            # Merge extracted data with existing leaderboard
             for player, dmg in extracted.items():
-                current_leaderboard[player] = max(current_leaderboard.get(player, 0), dmg)
+                player = normalize_name(player)
+                if player in current_leaderboard:
+                    current_leaderboard[player] = max(current_leaderboard[player], dmg)
+                else:
+                    current_leaderboard[player] = dmg
 
-            # Post updated leaderboard
             formatted = format_leaderboard(current_leaderboard)
             post_channel = bot.get_channel(POST_CHANNEL_ID)
             if post_channel:
