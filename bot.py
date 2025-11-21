@@ -24,26 +24,24 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 def normalize_name(name):
     """Normalize player names to prevent duplicates."""
-    # Strip leading/trailing whitespace, replace multiple spaces with single
-    name = " ".join(name.strip().split())
-    # Remove any leading digits/punctuation/number emojis
+    name = " ".join(name.strip().split())  # remove extra spaces
+    # Remove any leading/trailing punctuation/digits
     name = re.sub(r"^[^\w\u4e00-\u9fff]+", "", name)
     return name
 
 def remove_emojis(text):
     """Remove all emojis from text."""
-    # Pattern to remove most emojis
     emoji_pattern = re.compile(
         "["
-        "\U0001F1E0-\U0001F1FF"  # flags
-        "\U0001F300-\U0001F5FF"  # symbols & pictographs
-        "\U0001F600-\U0001F64F"  # emoticons
-        "\U0001F680-\U0001F6FF"  # transport & map symbols
-        "\U0001F700-\U0001F77F"  # alchemical symbols
-        "\U0001F780-\U0001F7FF"  # Geometric Shapes Extended
-        "\U0001F800-\U0001F8FF"  # Supplemental Arrows-C
-        "\U0001F900-\U0001F9FF"  # Supplemental Symbols & Pictographs
-        "\U0001FA00-\U0001FA6F"  # Chess Symbols, Symbols & Pictographs Extended-A
+        "\U0001F1E0-\U0001F1FF"
+        "\U0001F300-\U0001F5FF"
+        "\U0001F600-\U0001F64F"
+        "\U0001F680-\U0001F6FF"
+        "\U0001F700-\U0001F77F"
+        "\U0001F780-\U0001F7FF"
+        "\U0001F800-\U0001F8FF"
+        "\U0001F900-\U0001F9FF"
+        "\U0001FA00-\U0001FA6F"
         "\U0001FA70-\U0001FAFF"
         "\u2600-\u26FF\u2700-\u27BF"
         "]+", flags=re.UNICODE)
@@ -52,7 +50,6 @@ def remove_emojis(text):
 # ------------------- OCR -------------------
 
 def extract_leaderboard_from_image(path):
-    """Extract player names and damage points from image using OCR."""
     img = cv2.imread(path)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -91,15 +88,16 @@ def extract_leaderboard_from_image(path):
 # ------------------- Leaderboard Parsing -------------------
 
 def parse_leaderboard_message(msg_content):
-    """Parse previous leaderboard into {player: damage}."""
     leaderboard_dict = {}
     lines = msg_content.splitlines()[1:]  # skip header
     for line in lines:
         line = line.strip()
         if not line or "—" not in line:
             continue
-        line = remove_emojis(line)  # remove all emojis
-        line = re.sub(r"^[^\w\u4e00-\u9fff\d]+", "", line)  # strip remaining non-name chars
+        # Remove all emojis from the entire line
+        line = remove_emojis(line)
+        # Remove any remaining leading non-name chars
+        line = re.sub(r"^[^\w\u4e00-\u9fff]+", "", line)
         parts = line.rsplit("—", 1)
         if len(parts) != 2:
             continue
@@ -115,7 +113,6 @@ def parse_leaderboard_message(msg_content):
 # ------------------- Formatting -------------------
 
 def format_leaderboard(result_dict, top_n=50):
-    """Format leaderboard with medals for top 3, number emojis for 4–50."""
     sorted_list = sorted(result_dict.items(), key=lambda x: x[1], reverse=True)[:top_n]
     medals = ["🥇", "🥈", "🥉"]
     number_emoji = {
@@ -135,7 +132,6 @@ def format_leaderboard(result_dict, top_n=50):
 # ------------------- Permissions -------------------
 
 def can_reset(member):
-    """Check if a member can reset leaderboard."""
     if member.guild_permissions.administrator:
         return True
     for role in member.roles:
@@ -188,7 +184,7 @@ async def on_message(message):
             # Get latest leaderboard
             latest_msg, current_leaderboard = await get_latest_leaderboard_message()
 
-            # Merge extracted data with old leaderboard (normalized names)
+            # Merge extracted data with old leaderboard
             for player, dmg in extracted.items():
                 player = normalize_name(player)
                 current_leaderboard[player] = max(current_leaderboard.get(player, 0), dmg)
