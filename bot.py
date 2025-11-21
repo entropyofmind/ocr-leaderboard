@@ -62,7 +62,7 @@ def extract_leaderboard_from_image(path):
     return results
 
 def format_leaderboard(result_dict):
-    """Format leaderboard with emojis for top 3, numbers for rest"""
+    """Format leaderboard with emojis for top 3, numbers for the rest"""
     sorted_list = sorted(result_dict.items(), key=lambda x: x[1], reverse=True)
     medals = ["🥇", "🥈", "🥉"]
     lines = []
@@ -88,7 +88,7 @@ def parse_leaderboard_message(msg_content):
         line = line.strip()
         if not line or "—" not in line:
             continue
-        # Remove emoji/number prefix
+        # Remove any prefix (emoji or number)
         line = re.sub(r"^[^\w\d]*", "", line)
         parts = line.rsplit("—", 1)
         if len(parts) != 2:
@@ -156,7 +156,7 @@ async def on_message(message):
             post_channel = bot.get_channel(POST_CHANNEL_ID)
             if post_channel:
                 if latest_msg:
-                    # Edit existing message
+                    # Edit existing message with corrected numbering
                     await latest_msg.edit(content=f"**📊 OCR Leaderboard Results**\n{formatted}")
                 else:
                     # No existing leaderboard, post new
