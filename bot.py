@@ -104,8 +104,8 @@ def parse_leaderboard_message(msg_content):
         line = line.strip()
         if not line or "—" not in line:
             continue
-        # Remove any prefix (emoji or number)
-        line = re.sub(r"^[^\w\d]*", "", line)
+        # Remove any prefix: medals, number emojis, digits, or extra punctuation
+        line = re.sub(r"^[^\w\u4e00-\u9fff\d]*", "", line)
         parts = line.rsplit("—", 1)
         if len(parts) != 2:
             continue
@@ -172,6 +172,7 @@ async def on_message(message):
             post_channel = bot.get_channel(POST_CHANNEL_ID)
             if post_channel:
                 if latest_msg:
+                    # Edit existing message with updated rankings
                     await latest_msg.edit(content=f"**📊 OCR Leaderboard Results**\n{formatted}")
                 else:
                     await post_channel.send(f"**📊 OCR Leaderboard Results**\n{formatted}")
