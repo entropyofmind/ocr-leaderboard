@@ -13,7 +13,7 @@ from rapidfuzz import fuzz
 TOKEN = os.getenv("DISCORD_TOKEN")
 WATCH_CHANNEL_ID = 1441385260171661325
 POST_CHANNEL_ID = 1441385329440460902
-PLAYER_LOG_CHANNEL_ID = 1428423032929517669  # Replace with your log channel ID
+PLAYER_LOG_CHANNEL_ID = 1428423032929517669
 ALLOWED_RESET_ROLES = ["R5", "R4"]
 
 intents = discord.Intents.default()
@@ -55,29 +55,25 @@ text = pytesseract.image_to_string(gray)
 return text or ""
 
 def extract_leaderboard_from_image(path: str) -> dict:
-"""Return dict of {player_name: damage} from screenshot."""
 results = {}
 img = cv2.imread(path)
 if img is None:
 return results
 
 ```
-# Improved preprocessing
 gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 gray = cv2.medianBlur(gray, 3)
-thresh = cv2.adaptiveThreshold(gray, 255,
-                               cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                               cv2.THRESH_BINARY, 11, 2)
+thresh = cv2.adaptiveThreshold(
+    gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+)
 thresh = cv2.bitwise_not(thresh)
 scale = 2
 thresh = cv2.resize(thresh, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
-cv2.imwrite("debug_thresh.png", thresh)  # optional for debugging
 
 try:
-    data = pytesseract.image_to_data(thresh,
-                                     output_type=pytesseract.Output.DICT,
-                                     lang='chi_sim+eng',
-                                     config='--oem 3 --psm 6')
+    data = pytesseract.image_to_data(
+        thresh, output_type=pytesseract.Output.DICT, lang='chi_sim+eng', config='--oem 3 --psm 6'
+    )
 except Exception:
     data = pytesseract.image_to_data(thresh, output_type=pytesseract.Output.DICT)
 
@@ -126,7 +122,6 @@ return results
 # ----------------------------
 
 async def get_candidate_names(channel_id: int, limit: int = 50) -> list[str]:
-"""Fetch last `limit` messages and extract potential player names."""
 channel = bot.get_channel(channel_id)
 if not channel:
 return []
@@ -140,7 +135,6 @@ candidate_names.add(clean_line)
 return list(candidate_names)
 
 def match_official_name(ocr_name: str, candidates: list[str], threshold: int = 50) -> str:
-"""Return best candidate name if match >= threshold, else original."""
 best_name = ocr_name
 highest_score = 0
 ocr_name_clean = ocr_name.lower()
@@ -163,7 +157,6 @@ return best_name
 def merge_with_memory(extracted: dict, candidates: list[str], threshold: int = 90):
 global leaderboard_memory
 for raw_name, dmg in extracted.items():
-# Replace OCR name with official name if matched
 official_name = match_official_name(raw_name, candidates, threshold=50)
 new_name = normalize_name(official_name)
 matched = False
@@ -238,8 +231,10 @@ post_channel = bot.get_channel(POST_CHANNEL_ID)
 if post_channel:
 async for m in post_channel.history(limit=200):
 if m.author == bot.user and "📊 OCR Leaderboard Results" in m.content:
-try: await m.delete()
-except Exception: pass
+try:
+await m.delete()
+except Exception:
+pass
 await post_channel.send("✅ Leaderboard has been reset.")
 
 @bot.command(name="reset_memory")
@@ -277,24 +272,29 @@ try:
 
     raw_text = extract_text_raw(temp_file) or ""
     if "[" in raw_text or "]" in raw_text:
-        try: await message.add_reaction("❌")
-        except: pass
+        try:
+            await message.add_reaction("❌")
+        except:
+            pass
         warn = await message.channel.send(
             "❌ **Image invalid.** Please upload a screenshot from alliance mail and crop out everything except player names and damage values."
         )
         await asyncio.sleep(10)
-        try: await warn.delete()
-        except: pass
+        try:
+            await warn.delete()
+        except:
+            pass
         return
 
     extracted = extract_leaderboard_from_image(temp_file)
     if not extracted:
-        try: await message.add_reaction("❌")
-        except: pass
+        try:
+            await message.add_reaction("❌")
+        except:
+            pass
         await message.channel.send("❌ OCR failed or no players detected.")
         return
 
-    # Fetch candidate names from player log channel
     candidates = await get_candidate_names(PLAYER_LOG_CHANNEL_ID, limit=50)
     merge_with_memory(extracted, candidates)
 
@@ -302,25 +302,28 @@ try:
     if not post_channel:
         return
 
-    # Delete last leaderboard message
     if last_leaderboard_msg:
-        try: await last_leaderboard_msg.delete()
-        except: pass
+        try:
+            await last_leaderboard_msg.delete()
+        except:
+            pass
         last_leaderboard_msg = None
 
-    # Post leaderboard
     formatted_clean = format_leaderboard(leaderboard_memory, add_emojis=False, top_n=50)
     last_leaderboard_msg = await post_channel.send(f"**📊 OCR Leaderboard Results**\n{formatted_clean}")
     await asyncio.sleep(2)
     formatted_emojis = format_leaderboard(leaderboard_memory, add_emojis=True, top_n=50)
-    try: await last_leaderboard_msg.edit(content=f"**📊 OCR Leaderboard Results**\n{formatted_emojis}")
-    except: pass
+    try:
+        await last_leaderboard_msg.edit(content=f"**📊 OCR Leaderboard Results**\n{formatted_emojis}")
+    except:
+        pass
 
 finally:
     try:
         if os.path.exists(temp_file):
             os.remove(temp_file)
-    except: pass
+    except:
+        pass
 ```
 
 # ----------------------------
