@@ -24,6 +24,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ------------------- Memory -------------------
 leaderboard_memory = {}  # player_name -> damage
+last_leaderboard_msg = None  # stores the last leaderboard message object
 
 # ------------------- Utilities -------------------
 
@@ -72,8 +73,8 @@ def extract_leaderboard_from_image(path):
     prev_name = None
     for line in sorted_lines:
         line_text = " ".join(word for _, word in line).strip()
-        
-        # Match player names starting with [ ] (case-insensitive, preserves full brackets)
+
+        # Match player names starting with [ ] including lowercase
         name_match = re.match(r"\[[^\]]+\].+", line_text)
         if name_match:
             prev_name = name_match.group(0).strip()
@@ -144,14 +145,15 @@ async def reset_leaderboard(ctx):
     if not can_reset(ctx.author):
         await ctx.send("❌ You do not have permission to reset the leaderboard.")
         return
-    global leaderboard_memory
+    global leaderboard_memory, last_leaderboard_msg
     leaderboard_memory = {}
-    post_channel = bot.get_channel(POST_CHANNEL_ID)
-    if post_channel:
-        async for msg in post_channel.history(limit=100):
-            if msg.author == bot.user and "📊 OCR Leaderboard Results" in msg.content:
-                await msg.delete()
-        await post_channel.send("✅ Leaderboard has been reset.")
+    if last_leaderboard_msg:
+        try:
+            await last_leaderboard_msg.delete()
+        except discord.NotFound:
+            pass
+        last_leaderboard_msg = None
+    await ctx.send("✅ Leaderboard has been reset.")
 
 @bot.command(name="reset_memory")
 async def reset_memory(ctx):
@@ -166,12 +168,12 @@ async def reset_memory(ctx):
 
 @bot.event
 async def on_message(message):
+    global last_leaderboard_msg
     await bot.process_commands(message)
 
     if message.channel.id != WATCH_CHANNEL_ID or message.author == bot.user:
         return
 
-    # Process only the first valid image attachment
     image_att = next(
         (att for att in message.attachments if att.filename.lower().endswith((".png", ".jpg", ".jpeg"))),
         None
@@ -188,20 +190,25 @@ async def on_message(message):
         await message.channel.send("❌ OCR failed or no players detected.")
         return
 
-    # Merge new screenshot into memory with fuzzy matching
     merge_with_memory(extracted)
-
-    # Post clean leaderboard (no emojis)
-    formatted_clean = format_leaderboard(leaderboard_memory, add_emojis=False)
     post_channel = bot.get_channel(POST_CHANNEL_ID)
     if not post_channel:
         return
 
-    msg = await post_channel.send(f"**📊 OCR Leaderboard Results**\n{formatted_clean}")
+    # Delete previous leaderboard message if it exists
+    if last_leaderboard_msg:
+        try:
+            await last_leaderboard_msg.delete()
+        except discord.NotFound:
+            pass
+
+    # Post clean leaderboard (no emojis)
+    formatted_clean = format_leaderboard(leaderboard_memory, add_emojis=False)
+    last_leaderboard_msg = await post_channel.send(f"**📊 OCR Leaderboard Results**\n{formatted_clean}")
 
     # Wait 2 seconds, then edit to add emojis
     await asyncio.sleep(2)
     formatted_emojis = format_leaderboard(leaderboard_memory, add_emojis=True)
-    await msg.edit(content=f"**📊 OCR Leaderboard Results**\n{formatted_emojis}")
+    await last_leaderboard_msg.edit(content=f"**📊 OCR Leaderboard Results**\n{formatted_emojis}")
 
 bot.run(TOKEN)
