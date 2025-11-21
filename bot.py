@@ -25,15 +25,11 @@ def normalize_name(name):
     return " ".join(name.strip().split())
 
 def extract_leaderboard_from_image(path):
-    """
-    OCR function to extract player names and damage points.
-    Handles Unicode names including Chinese characters and parentheses.
-    """
+    """OCR function to extract player names and damage points."""
     img = cv2.imread(path)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-    # OCR with Unicode support
     data = pytesseract.image_to_data(thresh, output_type=pytesseract.Output.DICT, lang='chi_sim+eng')
 
     lines = defaultdict(list)
@@ -66,7 +62,7 @@ def extract_leaderboard_from_image(path):
     return results
 
 def format_leaderboard(result_dict):
-    """Format leaderboard with emojis for top 3, numbers for the rest"""
+    """Format leaderboard with emojis for top 3, numbers for rest"""
     sorted_list = sorted(result_dict.items(), key=lambda x: x[1], reverse=True)
     medals = ["🥇", "🥈", "🥉"]
     lines = []
@@ -92,9 +88,8 @@ def parse_leaderboard_message(msg_content):
         line = line.strip()
         if not line or "—" not in line:
             continue
-        # Remove emoji or number prefix
+        # Remove emoji/number prefix
         line = re.sub(r"^[^\w\d]*", "", line)
-        # Split by last '—' to keep names with dashes intact
         parts = line.rsplit("—", 1)
         if len(parts) != 2:
             continue
@@ -107,15 +102,15 @@ def parse_leaderboard_message(msg_content):
             continue
     return leaderboard_dict
 
-async def read_latest_leaderboard():
-    """Read the latest leaderboard message from POST_CHANNEL_ID"""
+async def get_latest_leaderboard_message():
+    """Return the most recent leaderboard message object and its content"""
     post_channel = bot.get_channel(POST_CHANNEL_ID)
     if not post_channel:
-        return {}
-    async for msg in post_channel.history(limit=50):
+        return None, {}
+    async for msg in post_channel.history(limit=100):
         if msg.author == bot.user and "📊 OCR Leaderboard Results" in msg.content:
-            return parse_leaderboard_message(msg.content)
-    return {}
+            return msg, parse_leaderboard_message(msg.content)
+    return None, {}
 
 @bot.command(name="reset_leaderboard")
 async def reset_leaderboard(ctx):
@@ -124,10 +119,9 @@ async def reset_leaderboard(ctx):
         return
     post_channel = bot.get_channel(POST_CHANNEL_ID)
     if post_channel:
-        # Delete previous leaderboard messages
-        async for msg in post_channel.history(limit=50):
-            if msg.author == bot.user and "📊 OCR Leaderboard Results" in msg.content:
-                await msg.delete()
+        msg, _ = await get_latest_leaderboard_message()
+        if msg:
+            await msg.delete()
         await post_channel.send("✅ Leaderboard has been reset.")
 
 @bot.event
@@ -149,18 +143,23 @@ async def on_message(message):
                 await message.channel.send("❌ OCR failed or no players detected.")
                 return
 
-            # Read the most recent leaderboard
-            current_leaderboard = await read_latest_leaderboard()
+            # Get latest leaderboard message
+            latest_msg, current_leaderboard = await get_latest_leaderboard_message()
 
-            # Merge extracted with existing leaderboard, keep highest damage
+            # Merge extracted data with existing leaderboard, keeping highest damage
             for player, dmg in extracted.items():
                 player = normalize_name(player)
                 current_leaderboard[player] = max(current_leaderboard.get(player, 0), dmg)
 
-            # Post updated leaderboard
             formatted = format_leaderboard(current_leaderboard)
+
             post_channel = bot.get_channel(POST_CHANNEL_ID)
             if post_channel:
-                await post_channel.send(f"**📊 OCR Leaderboard Results**\n{formatted}")
+                if latest_msg:
+                    # Edit existing message
+                    await latest_msg.edit(content=f"**📊 OCR Leaderboard Results**\n{formatted}")
+                else:
+                    # No existing leaderboard, post new
+                    await post_channel.send(f"**📊 OCR Leaderboard Results**\n{formatted}")
 
 bot.run(TOKEN)
