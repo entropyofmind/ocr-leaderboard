@@ -29,7 +29,6 @@ leaderboard_memory = {}  # player_name -> damage
 
 def normalize_name(name):
     name = " ".join(name.strip().split())
-    name = re.sub(r"^[^\w\u4e00-\u9fff]+", "", name)
     return name
 
 def remove_emojis(text):
@@ -73,18 +72,19 @@ def extract_leaderboard_from_image(path):
     prev_name = None
     for line in sorted_lines:
         line_text = " ".join(word for _, word in line).strip()
-        match = re.search(r"Damage Points[:\s]*([\d\s,]+)", line_text, re.IGNORECASE)
-        if match and prev_name:
-            damage_str = match.group(1).replace(" ", "").replace(",", "")
-            try:
-                damage = int(damage_str)
-                player = normalize_name(prev_name)
-                results[player] = damage
-            except ValueError:
-                pass
+        if line_text.startswith("["):  # only consider lines starting with "["
+            prev_name = line_text.strip()  # keep full name including brackets
+        elif "Damage Points" in line_text and prev_name:
+            match = re.search(r"Damage Points[:\s]*([\d\s,]+)", line_text, re.IGNORECASE)
+            if match:
+                damage_str = match.group(1).replace(" ", "").replace(",", "")
+                try:
+                    damage = int(damage_str)
+                    player = normalize_name(prev_name)
+                    results[player] = damage
+                except ValueError:
+                    pass
             prev_name = None
-        else:
-            prev_name = line_text
     return results
 
 # ------------------- Fuzzy Merge -------------------
@@ -92,7 +92,6 @@ def extract_leaderboard_from_image(path):
 def merge_with_memory(extracted):
     global leaderboard_memory
     for new_player, new_dmg in extracted.items():
-        new_player = normalize_name(new_player)
         matched = False
         for existing_player in leaderboard_memory:
             ratio = fuzz.ratio(new_player.lower(), existing_player.lower())
