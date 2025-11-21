@@ -151,6 +151,15 @@ async def reset_leaderboard(ctx):
                 await msg.delete()
         await post_channel.send("✅ Leaderboard has been reset.")
 
+@bot.command(name="reset_memory")
+async def reset_memory(ctx):
+    if not can_reset(ctx.author):
+        await ctx.send("❌ You do not have permission to reset the leaderboard memory.")
+        return
+    global leaderboard_memory
+    leaderboard_memory = {}
+    await ctx.send("✅ Leaderboard memory has been cleared. The bot will start fresh on the next screenshot.")
+
 # ------------------- Bot Event -------------------
 
 @bot.event
