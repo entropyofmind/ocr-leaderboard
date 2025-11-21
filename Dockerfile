@@ -16,9 +16,7 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-# Install Python dependencies in proper order
 COPY requirements.txt .
-RUN pip install --no-cache-dir numpy==1.27.8
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
