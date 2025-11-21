@@ -1,41 +1,15 @@
-# Python cache
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-
-# Python virtual environment
-venv/
-env/
-ENV/
-
-# pip cache
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Tesseract / OCR cache
+.env
 .cache/
-
-# Logs
 *.log
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Images / screenshots / output files
 *.png
 *.jpg
 *.jpeg
 screenshots/
 output/
 tmp/
-
-# IDE / Editor
 .vscode/
 .idea/
-*.sublime-project
-*.sublime-workspace
-
-# Docker (optional)
-*.dockerignore
