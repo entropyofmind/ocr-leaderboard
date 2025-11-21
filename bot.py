@@ -1,53 +1,199 @@
-~~~{"variant":"standard","title":"Temporary Debug bot.py for OCR output","id":"93712"}
+# bot.py
 import os
+import re
 import asyncio
 import discord
 from discord.ext import commands
-import pytesseract
+from paddleocr import PaddleOCR
 import cv2
+from collections import defaultdict
+from rapidfuzz import fuzz
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 WATCH_CHANNEL_ID = 1441385260171661325
+POST_CHANNEL_ID = 1441385329440460902
+ALLOWED_RESET_ROLES = ["R5", "R4"]
 
 intents = discord.Intents.default()
 intents.message_content = True
 intents.messages = True
 intents.guilds = True
+intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-def extract_text_raw(path: str) -> str:
-    img = cv2.imread(path)
-    if img is None:
-        return ""
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    try:
-        text = pytesseract.image_to_string(gray, lang='chi_sim+eng')
-    except Exception:
-        text = pytesseract.image_to_string(gray)
-    return text or ""
+leaderboard_memory = {}
+last_leaderboard_msg = None
 
+# ---------------- PaddleOCR Setup ----------------
+ocr_model = PaddleOCR(use_angle_cls=True, lang='ch', rec=True, use_gpu=False)
+
+# ---------------- Utilities ----------------
+def normalize_name(name: str) -> str:
+    return " ".join(name.strip().split())
+
+# ---------------- OCR ----------------
+def extract_leaderboard_from_image(path: str) -> dict:
+    results = {}
+    try:
+        ocr_results = ocr_model.ocr(path, cls=True)
+    except Exception:
+        return results
+
+    prev_name = None
+    for line in ocr_results:
+        for (_, (text, conf)) in line:
+            if conf < 0.4:
+                continue
+            text = text.strip()
+            # skip empty
+            if not text:
+                continue
+            dp_match = re.search(r"Damage Points[:\s]*([\d\s,]+)", text, re.IGNORECASE)
+            if dp_match and prev_name:
+                damage_str = dp_match.group(1).replace(" ", "").replace(",", "")
+                try:
+                    damage = int(damage_str)
+                    player = normalize_name(prev_name)
+                    results[player] = damage
+                except Exception:
+                    pass
+                prev_name = None
+            else:
+                prev_name = text
+    return results
+
+# ---------------- Fuzzy Merge ----------------
+def merge_with_memory(extracted: dict, threshold: int = 90):
+    global leaderboard_memory
+    for raw_name, dmg in extracted.items():
+        new_name = normalize_name(raw_name)
+        matched = False
+        if new_name in leaderboard_memory:
+            leaderboard_memory[new_name] = max(leaderboard_memory[new_name], dmg)
+            continue
+        for exist in list(leaderboard_memory.keys()):
+            try:
+                score = fuzz.ratio(new_name.lower(), exist.lower())
+            except Exception:
+                score = 0
+            if score >= threshold:
+                leaderboard_memory[exist] = max(leaderboard_memory[exist], dmg)
+                matched = True
+                break
+        if not matched:
+            leaderboard_memory[new_name] = dmg
+
+# ---------------- Formatting ----------------
+def format_leaderboard(result_dict: dict, add_emojis: bool = False, top_n: int = 50) -> str:
+    sorted_list = sorted(result_dict.items(), key=lambda x: x[1], reverse=True)[:top_n]
+    medals = ["🥇", "🥈", "🥉"]
+    number_emoji = {"0":"0️⃣","1":"1️⃣","2":"2️⃣","3":"3️⃣","4":"4️⃣","5":"5️⃣","6":"6️⃣","7":"7️⃣","8":"8️⃣","9":"9️⃣"}
+    lines = []
+    for idx, (name, dmg) in enumerate(sorted_list):
+        if add_emojis:
+            if idx < 3:
+                prefix = medals[idx]
+            else:
+                rank = str(idx + 1)
+                prefix = "".join(number_emoji[d] for d in rank)
+            lines.append(f"{prefix} {name} — {dmg}")
+        else:
+            lines.append(f"{name} — {dmg}")
+    return "\n".join(lines)
+
+# ---------------- Permissions ----------------
+def can_reset(member: discord.Member) -> bool:
+    if member.guild_permissions.administrator:
+        return True
+    for role in member.roles:
+        if role.name in ALLOWED_RESET_ROLES:
+            return True
+    return False
+
+# ---------------- Bot Commands ----------------
+@bot.command(name="reset_leaderboard")
+async def reset_leaderboard(ctx):
+    if not can_reset(ctx.author):
+        await ctx.send("❌ You do not have permission to reset the leaderboard.")
+        return
+    global leaderboard_memory, last_leaderboard_msg
+    leaderboard_memory = {}
+    last_leaderboard_msg = None
+    post_channel = bot.get_channel(POST_CHANNEL_ID)
+    if post_channel:
+        async for m in post_channel.history(limit=200):
+            if m.author == bot.user and "📊 OCR Leaderboard Results" in m.content:
+                try: await m.delete()
+                except: pass
+        await post_channel.send("✅ Leaderboard has been reset.")
+
+@bot.command(name="reset_memory")
+async def reset_memory(ctx):
+    if not can_reset(ctx.author):
+        await ctx.send("❌ You do not have permission to reset memory.")
+        return
+    global leaderboard_memory
+    leaderboard_memory = {}
+    await ctx.send("✅ Leaderboard memory cleared. The bot will start fresh on the next screenshot.")
+
+# ---------------- Bot Event ----------------
 @bot.event
 async def on_message(message: discord.Message):
+    global last_leaderboard_msg
     await bot.process_commands(message)
     if message.author == bot.user or message.channel.id != WATCH_CHANNEL_ID:
         return
     image_att = next((att for att in message.attachments if att.filename.lower().endswith((".png",".jpg",".jpeg"))), None)
     if not image_att:
         return
-
-    temp_file = "latest_debug.png"
+    temp_file = "latest.png"
     try:
         await image_att.save(temp_file)
-        raw_text = extract_text_raw(temp_file) or ""
-        print(f"RAW OCR OUTPUT:\n{raw_text}\n{'-'*50}")
-        await message.channel.send(f"```RAW OCR OUTPUT:\n{raw_text}```")
+        # Reject if any brackets in screenshot text
+        import paddleocr
+        raw_text = ""
+        ocr_result = ocr_model.ocr(temp_file, cls=True)
+        for line in ocr_result:
+            for _, (text, conf) in line:
+                if "[" in text or "]" in text:
+                    try: await message.add_reaction("❌")
+                    except: pass
+                    warn = await message.channel.send(
+                        "❌ **Image invalid.** Please upload a screenshot from alliance mail and crop out everything except player names and damage values."
+                    )
+                    await asyncio.sleep(10)
+                    try: await warn.delete()
+                    except: pass
+                    return
+        extracted = extract_leaderboard_from_image(temp_file)
+        if not extracted:
+            try: await message.add_reaction("❌")
+            except: pass
+            await message.channel.send("❌ OCR failed or no players detected.")
+            return
+        merge_with_memory(extracted)
+        post_channel = bot.get_channel(POST_CHANNEL_ID)
+        if not post_channel:
+            return
+        # Delete previous leaderboard message
+        if last_leaderboard_msg:
+            try: await last_leaderboard_msg.delete()
+            except: pass
+            last_leaderboard_msg = None
+        formatted_clean = format_leaderboard(leaderboard_memory, add_emojis=False)
+        last_leaderboard_msg = await post_channel.send(f"**📊 OCR Leaderboard Results**\n{formatted_clean}")
+        await asyncio.sleep(2)
+        formatted_emojis = format_leaderboard(leaderboard_memory, add_emojis=True)
+        try: await last_leaderboard_msg.edit(content=f"**📊 OCR Leaderboard Results**\n{formatted_emojis}")
+        except: pass
     finally:
-        if os.path.exists(temp_file):
-            os.remove(temp_file)
+        try:
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+        except: pass
 
 if __name__ == "__main__":
     if not TOKEN:
         raise RuntimeError("DISCORD_TOKEN environment variable required.")
     bot.run(TOKEN)
-~~~
