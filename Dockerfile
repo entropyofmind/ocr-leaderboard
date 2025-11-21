@@ -1,5 +1,6 @@
 FROM python:3.10-slim
 
+# Install system dependencies
 RUN apt-get update && \
     apt-get install -y \
         tesseract-ocr \
@@ -9,12 +10,15 @@ RUN apt-get update && \
         libglib2.0-0 \
         libsm6 \
         libxrender1 \
-        libxext6 && \
+        libxext6 \
+        build-essential && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
+# Install Python dependencies in proper order
 COPY requirements.txt .
+RUN pip install --no-cache-dir numpy==1.27.8
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
