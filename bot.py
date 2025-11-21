@@ -24,12 +24,12 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ------------------- Memory -------------------
 leaderboard_memory = {}  # player_name -> damage
-last_leaderboard_msg = None  # stores the last leaderboard message object
 
 # ------------------- Utilities -------------------
 
 def normalize_name(name):
     name = " ".join(name.strip().split())
+    name = re.sub(r"^[^\w\u4e00-\u9fff]+", "", name)
     return name
 
 def remove_emojis(text):
@@ -73,22 +73,18 @@ def extract_leaderboard_from_image(path):
     prev_name = None
     for line in sorted_lines:
         line_text = " ".join(word for _, word in line).strip()
-
-        # Match player names starting with [ ] including lowercase
-        name_match = re.match(r"\[[^\]]+\].+", line_text)
-        if name_match:
-            prev_name = name_match.group(0).strip()
-        elif "Damage Points" in line_text and prev_name:
-            match = re.search(r"Damage Points[:\s]*([\d\s,]+)", line_text, re.IGNORECASE)
-            if match:
-                damage_str = match.group(1).replace(" ", "").replace(",", "")
-                try:
-                    damage = int(damage_str)
-                    player = normalize_name(prev_name)
-                    results[player] = damage
-                except ValueError:
-                    pass
+        match = re.search(r"Damage Points[:\s]*([\d\s,]+)", line_text, re.IGNORECASE)
+        if match and prev_name:
+            damage_str = match.group(1).replace(" ", "").replace(",", "")
+            try:
+                damage = int(damage_str)
+                player = normalize_name(prev_name)
+                results[player] = damage
+            except ValueError:
+                pass
             prev_name = None
+        else:
+            prev_name = line_text
     return results
 
 # ------------------- Fuzzy Merge -------------------
@@ -96,6 +92,7 @@ def extract_leaderboard_from_image(path):
 def merge_with_memory(extracted):
     global leaderboard_memory
     for new_player, new_dmg in extracted.items():
+        new_player = normalize_name(new_player)
         matched = False
         for existing_player in leaderboard_memory:
             ratio = fuzz.ratio(new_player.lower(), existing_player.lower())
@@ -145,15 +142,14 @@ async def reset_leaderboard(ctx):
     if not can_reset(ctx.author):
         await ctx.send("❌ You do not have permission to reset the leaderboard.")
         return
-    global leaderboard_memory, last_leaderboard_msg
+    global leaderboard_memory
     leaderboard_memory = {}
-    if last_leaderboard_msg:
-        try:
-            await last_leaderboard_msg.delete()
-        except discord.NotFound:
-            pass
-        last_leaderboard_msg = None
-    await ctx.send("✅ Leaderboard has been reset.")
+    post_channel = bot.get_channel(POST_CHANNEL_ID)
+    if post_channel:
+        async for msg in post_channel.history(limit=100):
+            if msg.author == bot.user and "📊 OCR Leaderboard Results" in msg.content:
+                await msg.delete()
+        await post_channel.send("✅ Leaderboard has been reset.")
 
 @bot.command(name="reset_memory")
 async def reset_memory(ctx):
@@ -168,12 +164,12 @@ async def reset_memory(ctx):
 
 @bot.event
 async def on_message(message):
-    global last_leaderboard_msg
     await bot.process_commands(message)
 
     if message.channel.id != WATCH_CHANNEL_ID or message.author == bot.user:
         return
 
+    # Process only the first valid image attachment
     image_att = next(
         (att for att in message.attachments if att.filename.lower().endswith((".png", ".jpg", ".jpeg"))),
         None
@@ -190,25 +186,20 @@ async def on_message(message):
         await message.channel.send("❌ OCR failed or no players detected.")
         return
 
+    # Merge new screenshot into memory with fuzzy matching
     merge_with_memory(extracted)
+
+    # Post clean leaderboard (no emojis)
+    formatted_clean = format_leaderboard(leaderboard_memory, add_emojis=False)
     post_channel = bot.get_channel(POST_CHANNEL_ID)
     if not post_channel:
         return
 
-    # Delete previous leaderboard message if it exists
-    if last_leaderboard_msg:
-        try:
-            await last_leaderboard_msg.delete()
-        except discord.NotFound:
-            pass
-
-    # Post clean leaderboard (no emojis)
-    formatted_clean = format_leaderboard(leaderboard_memory, add_emojis=False)
-    last_leaderboard_msg = await post_channel.send(f"**📊 OCR Leaderboard Results**\n{formatted_clean}")
+    msg = await post_channel.send(f"**📊 OCR Leaderboard Results**\n{formatted_clean}")
 
     # Wait 2 seconds, then edit to add emojis
     await asyncio.sleep(2)
     formatted_emojis = format_leaderboard(leaderboard_memory, add_emojis=True)
-    await last_leaderboard_msg.edit(content=f"**📊 OCR Leaderboard Results**\n{formatted_emojis}")
+    await msg.edit(content=f"**📊 OCR Leaderboard Results**\n{formatted_emojis}")
 
 bot.run(TOKEN)
