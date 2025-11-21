@@ -61,13 +61,29 @@ def extract_leaderboard_from_image(path):
             prev_name = line_text
     return results
 
-def format_leaderboard(result_dict):
-    """Format leaderboard with emojis for top 3, numbers for the rest"""
-    sorted_list = sorted(result_dict.items(), key=lambda x: x[1], reverse=True)
+def format_leaderboard(result_dict, top_n=50):
+    """Format leaderboard with medals for top 3 and number emojis for 4–50"""
+    sorted_list = sorted(result_dict.items(), key=lambda x: x[1], reverse=True)[:top_n]
     medals = ["🥇", "🥈", "🥉"]
+    number_emoji = {
+        "0": "0️⃣",
+        "1": "1️⃣",
+        "2": "2️⃣",
+        "3": "3️⃣",
+        "4": "4️⃣",
+        "5": "5️⃣",
+        "6": "6️⃣",
+        "7": "7️⃣",
+        "8": "8️⃣",
+        "9": "9️⃣"
+    }
     lines = []
     for idx, (name, dmg) in enumerate(sorted_list):
-        prefix = medals[idx] if idx < 3 else f"{idx+1}."
+        if idx < 3:
+            prefix = medals[idx]
+        else:
+            rank = str(idx + 1)
+            prefix = "".join(number_emoji[d] for d in rank)
         lines.append(f"{prefix} {name} — {dmg}")
     return "\n".join(lines)
 
@@ -151,15 +167,13 @@ async def on_message(message):
                 player = normalize_name(player)
                 current_leaderboard[player] = max(current_leaderboard.get(player, 0), dmg)
 
-            formatted = format_leaderboard(current_leaderboard)
+            formatted = format_leaderboard(current_leaderboard, top_n=50)
 
             post_channel = bot.get_channel(POST_CHANNEL_ID)
             if post_channel:
                 if latest_msg:
-                    # Edit existing message with corrected numbering
                     await latest_msg.edit(content=f"**📊 OCR Leaderboard Results**\n{formatted}")
                 else:
-                    # No existing leaderboard, post new
                     await post_channel.send(f"**📊 OCR Leaderboard Results**\n{formatted}")
 
 bot.run(TOKEN)
